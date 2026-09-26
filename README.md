@@ -66,17 +66,38 @@ Net: Result is at worst as cheap as returning any small object, and **strictly c
 
 ### Measured
 
-`pnpm benchmark` runs `src/result/benchmark.ts` — 2,000,000 iterations per case, JIT-warmed with 100,000 iterations first:
+`pnpm benchmark` runs `src/result/benchmark.ts`, JIT-warmed before each timed run:
 
 ```
-Result.Ok (success path)                    2.0 ms       1.0 ns/op   1.00x
-try/catch (success path, no throw)          8.6 ms       4.3 ns/op   4.35x
-Result.Err (failure path, no throw)        21.1 ms      10.5 ns/op   10.60x
-try/catch (failure path, real throw)     5611.1 ms    2805.6 ns/op   2822.32x
+Single layer — 2,000,000 iterations, 100,000 warmup
+
+Result.Ok (success path)                            2.0 ms       1.0 ns/op   1.00x
+try/catch (success path, no throw)                  8.5 ms       4.3 ns/op   4.23x
+Result.Err (failure path, no throw)                17.7 ms       8.8 ns/op   8.77x
+try/catch (failure path, real throw)             5330.9 ms    2665.5 ns/op   2641.02x
+
+Multi-layer propagation — 300,000 iterations, 20,000 warmup
+
+try/catch (3-layer catch + rethrow)              2945.3 ms    9817.8 ns/op   1.00x
+Result (1 throw at boundary, 3-layer propagate)    720.8 ms    2402.6 ns/op   0.24x
 ```
 
 Both success paths sit in single-digit nanoseconds — noise, not signal. The gap opens entirely
-on the *failure* path: an unthrown `Result.Err` costs ~10ns, a real `throw`/`catch` costs ~2.8µs —
-**~2800x** slower. That cost is stack-trace capture and exception unwinding, not the object
-allocation `Result` also pays. Numbers are from one machine/Node version and will vary — rerun
-locally with `pnpm benchmark` rather than trusting these as absolute.
+on the *failure* path: an unthrown `Result.Err` costs ~9ns, a real `throw`/`catch` costs ~2.7µs —
+**~2600x** slower. That cost is stack-trace capture and exception unwinding, not the object
+allocation `Result` also pays.
+
+**`Result.from`/`Result.fromSync` don't dodge that cost — they still wrap a `try/catch`, so the
+one real throw at the actual I/O boundary (a failed Prisma write, a bad `JSON.parse`) is paid in
+full, exactly once.** What changes is everything *above* that boundary. The "multi-layer" case
+simulates the realistic shape of each style: a boundary call fails, and a service layer, a domain
+layer, and a controller layer each want to react to it. The naive try/catch version catches and
+rethrows a *new* `Error` at every layer — three stack captures, not one. The `Result` version
+throws once at the boundary (`Result.fromSync`), then every layer above just returns the same
+`TResult` object back up — no new throw, no new stack capture. That's why it comes out **~4x
+cheaper than the single throw it replaces, not just cheaper than three of them**: propagating an
+already-built `Result` through N layers costs next to nothing, while catch-and-rethrow pays the
+full stack-capture tax at every one of those layers.
+
+Numbers are from one machine/Node version and will vary — rerun locally with `pnpm benchmark`
+rather than trusting these as absolute.
