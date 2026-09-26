@@ -9,16 +9,16 @@ class WalletService {
   withdraw(args: { balanceCents: number; amountCents: number }): WithdrawResult {
     const isInvalidAmount = args.amountCents <= 0;
     if (isInvalidAmount) {
-      // TODO 1: return a Result.Err carrying 'INVALID_AMOUNT'
+      return Result.Err('INVALID_AMOUNT');
     }
 
     const hasInsufficientFunds = args.amountCents > args.balanceCents;
     if (hasInsufficientFunds) {
-      // TODO 2: return a Result.Err carrying 'INSUFFICIENT_FUNDS'
+      return Result.Err('INSUFFICIENT_FUNDS');
     }
 
     const newBalanceCents = args.balanceCents - args.amountCents;
-    // TODO 3: return a Result.Ok wrapping { newBalanceCents }
+    return Result.Ok({newBalanceCents});
   }
 }
 
